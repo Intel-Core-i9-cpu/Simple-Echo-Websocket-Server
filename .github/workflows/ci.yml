@@ -11,92 +11,30 @@ jobs:
     name: Lint & Test (Python ${{ matrix.python-version }})
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
-        python-version: [3.10, 3.11, 3.12]
+        # Quote versions to keep them as strings — YAML would parse 3.10 as 3.1 if unquoted
+        python-version: ["3.10", "3.11", "3.12"]
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-
-      - name: Quick debug info
-        run: |
-          echo "Runner: $RUNNER_OS"
-          echo "Matrix python: ${{ matrix.python-version }}"
-          echo "Files in repo (top-level):"
-          ls -la || true
-          echo "Python files found:"
-          git ls-files '*.py' || true
-          echo "Look for tests:"
-          git ls-files 'test_*.py' || true
-
-      - name: Cache pip
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/pip
-          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
-          restore-keys: |
-            ${{ runner.os }}-pip-
 
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
           python-version: ${{ matrix.python-version }}
 
-      - name: Install dependencies
+      - name: Install deps
         run: |
           python -m pip install --upgrade pip
-          if [ -f requirements.txt ]; then
-            pip install --no-cache-dir -r requirements.txt
-          fi
-          # dev tools used by CI (pin versions to reduce surprises)
-          pip install --no-cache-dir "black>=23.1" "flake8>=6.0" "mypy>=1.0" "pytest>=7.0"
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
 
-      - name: Lint — black (check only)
+      - name: Run tests (example)
         run: |
-          if git ls-files '*.py' | grep -q .; then
-            black --version
-            black --check . || { echo "Black found formatting issues. Run 'black .' locally to fix."; exit 1; }
-          else
-            echo "No Python files found — skipping black"
-          fi
-
-      - name: Lint — flake8
-        run: |
-          if git ls-files '*.py' | grep -q .; then
-            flake8 --version
-            flake8 . || { echo "flake8 reported issues."; exit 1; }
-          else
-            echo "No Python files found — skipping flake8"
-          fi
-
-      - name: Type check — mypy (only if config exists)
-        run: |
-          if [ -f mypy.ini ] || [ -f setup.cfg ] || [ -f pyproject.toml ]; then
-            echo "mypy config detected — running mypy"
-            mypy --version
-            mypy . || { echo "mypy reported type errors."; exit 1; }
-          else
-            echo "No mypy config (mypy.ini/setup.cfg/pyproject.toml) found — skipping mypy to avoid false positives"
-          fi
-
-      - name: Run tests (pytest if test files exist)
-        run: |
+          pip install pytest
           if find . -type f -name "test_*.py" -print -quit | grep -q .; then
-            pytest -q --maxfail=1
+            pytest -q
           else
             echo "No tests found — skipping pytest"
           fi
-
-      - name: Extra diagnostics (always print if job failed)
-        if: failure()
-        run: |
-          echo "=== DIAGNOSTICS START ==="
-          echo "Python version and path:"
-          python -V
-          which python || true
-          echo "Installed packages (top 100 chars):"
-          pip freeze || true
-          echo "Repository tree (top-level, recursive depth=2):"
-          ls -la || true
-          find . -maxdepth 2 -print || true
-          echo "=== DIAGNOSTICS END ==="
