@@ -1,4 +1,4 @@
-name: CI
+name: CI — lint, typecheck, test (safer)
 
 on:
   push:
@@ -18,6 +18,17 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Quick debug info
+        run: |
+          echo "Runner: $RUNNER_OS"
+          echo "Matrix python: ${{ matrix.python-version }}"
+          echo "Files in repo (top-level):"
+          ls -la || true
+          echo "Python files found:"
+          git ls-files '*.py' || true
+          echo "Look for tests:"
+          git ls-files 'test_*.py' || true
+
       - name: Cache pip
         uses: actions/cache@v4
         with:
@@ -34,30 +45,58 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
-          # dev tools used by CI (pin or move to requirements-dev if you prefer)
-          pip install pytest flake8 black mypy
+          if [ -f requirements.txt ]; then
+            pip install --no-cache-dir -r requirements.txt
+          fi
+          # dev tools used by CI (pin versions to reduce surprises)
+          pip install --no-cache-dir "black>=23.1" "flake8>=6.0" "mypy>=1.0" "pytest>=7.0"
 
-      - name: Lint — black
+      - name: Lint — black (check only)
         run: |
-          # black will exit non-zero if formatting is needed
-          black --version
-          black --check .
+          if git ls-files '*.py' | grep -q .; then
+            black --version
+            black --check . || { echo "Black found formatting issues. Run 'black .' locally to fix."; exit 1; }
+          else
+            echo "No Python files found — skipping black"
+          fi
 
       - name: Lint — flake8
         run: |
-          flake8 .
+          if git ls-files '*.py' | grep -q .; then
+            flake8 --version
+            flake8 . || { echo "flake8 reported issues."; exit 1; }
+          else
+            echo "No Python files found — skipping flake8"
+          fi
 
-      - name: Type check — mypy
+      - name: Type check — mypy (only if config exists)
         run: |
-          # skip if there are no python files or mypy is not configured, adjust as needed
-          mypy .
+          if [ -f mypy.ini ] || [ -f setup.cfg ] || [ -f pyproject.toml ]; then
+            echo "mypy config detected — running mypy"
+            mypy --version
+            mypy . || { echo "mypy reported type errors."; exit 1; }
+          else
+            echo "No mypy config (mypy.ini/setup.cfg/pyproject.toml) found — skipping mypy to avoid false positives"
+          fi
 
-      - name: Run tests (if present)
+      - name: Run tests (pytest if test files exist)
         run: |
-          # only run pytest if test files exist
           if find . -type f -name "test_*.py" -print -quit | grep -q .; then
-            pytest -q
+            pytest -q --maxfail=1
           else
             echo "No tests found — skipping pytest"
           fi
+
+      - name: Extra diagnostics (always print if job failed)
+        if: failure()
+        run: |
+          echo "=== DIAGNOSTICS START ==="
+          echo "Python version and path:"
+          python -V
+          which python || true
+          echo "Installed packages (top 100 chars):"
+          pip freeze || true
+          echo "Repository tree (top-level, recursive depth=2):"
+          ls -la || true
+          find . -maxdepth 2 -print || true
+          echo "=== DIAGNOSTICS END ==="
